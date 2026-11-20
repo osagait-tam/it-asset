@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IT Asset Inventory & Barcode</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans">
+
+  <!-- Header -->
+  <header class="bg-blue-700 text-white shadow-md">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row justify-between items-center gap-3">
+      <div>
+        <h1 class="text-xl font-bold tracking-wide">IT Asset Inventory & Barcode</h1>
+        <p class="text-xs text-blue-200" id="db-status">Mode: Penyimpanan Lokal Browser (Offline Ready)</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button onclick="downloadTemplate()" class="bg-blue-600 hover:bg-blue-500 text-xs px-3 py-2 rounded font-medium border border-blue-400">
+          Unduh Templat CSV
+        </button>
+        <label class="bg-emerald-600 hover:bg-emerald-500 text-xs px-3 py-2 rounded font-medium cursor-pointer">
+          Impor Data (.csv / .xlsx)
+          <input type="file" id="excelInput" accept=".xlsx,.xls,.csv" class="hidden" onchange="importExcel(event)" />
+        </label>
+        <button onclick="exportExcel()" class="bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs px-3 py-2 rounded font-semibold">
+          Ekspor ke Excel (.xlsx)
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- Statistik -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-blue-600">
+        <p class="text-xs text-slate-500 uppercase">Total Perangkat</p>
+        <p class="text-2xl font-bold" id="stat-total">0</p>
+      </div>
+      <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-emerald-600">
+        <p class="text-xs text-slate-500 uppercase">Tersedia (Stok)</p>
+        <p class="text-2xl font-bold text-emerald-600" id="stat-available">0</p>
+      </div>
+      <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-amber-500">
+        <p class="text-xs text-slate-500 uppercase">Digunakan (Keluar)</p>
+        <p class="text-2xl font-bold text-amber-600" id="stat-used">0</p>
+      </div>
+      <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-rose-600">
+        <p class="text-xs text-slate-500 uppercase">Rusak / Servis</p>
+        <p class="text-2xl font-bold text-rose-600" id="stat-broken">0</p>
+      </div>
+    </div>
+
+    <!-- Form Tambah / Edit Data -->
+    <section id="formSection" class="bg-white p-5 rounded-lg shadow-sm border-t-4 border-blue-700 transition-colors">
+      <div class="flex justify-between items-center mb-4 border-b pb-2">
+        <h2 id="formTitle" class="text-base font-bold text-slate-700">Input Aset Baru</h2>
+        <span id="editBadge" class="hidden bg-amber-100 text-amber-800 text-xs font-semibold px-2.5 py-0.5 rounded">Mode Edit Aset</span>
+      </div>
+      <form id="assetForm" onsubmit="saveAsset(event)" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <input type="hidden" id="editId" value="" />
+        <div>
+          <label class="block text-xs font-medium mb-1">Kode Aset / Barcode *</label>
+          <input type="text" id="kode" oninput="autoFillLocationFromCode()" required placeholder="Contoh: IT-BRB-001" class="w-full border rounded px-3 py-2 text-sm uppercase" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium mb-1">Nama & Tipe Barang *</label>
+          <input type="text" id="nama" required placeholder="Contoh: Laptop Dell Latitude 5420" class="w-full border rounded px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium mb-1">Kategori</label>
+          <select id="kategori" class="w-full border rounded px-3 py-2 text-sm">
+            <option value="Laptop">Laptop</option>
+            <option value="PC Desktop">PC Desktop</option>
+            <option value="Monitor">Monitor</option>
+            <option value="Printer / Scanner">Printer / Scanner</option>
+            <option value="Networking (Router/Switch)">Networking (Router/Switch)</option>
+            <option value="Aksesoris / Periferal">Aksesoris / Periferal</option>
+            <option value="Lainnya">Lainnya</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium mb-1">Status</label>
+          <select id="status" class="w-full border rounded px-3 py-2 text-sm">
+            <option value="Tersedia">Tersedia</option>
+            <option value="Digunakan">Digunakan</option>
+            <option value="Rusak / Servis">Rusak / Servis</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium mb-1">Tanggal Masuk</label>
+          <input type="date" id="tglMasuk" class="w-full border rounded px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium mb-1">Tanggal Keluar</label>
+          <input type="date" id="tglKeluar" class="w-full border rounded px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium mb-1">Lokasi / Kantor Cabang *</label>
+          <input type="text" id="lokasi" list="daftarLokasi" required placeholder="Kantor Pusat / Cabang Brebes" class="w-full border rounded px-3 py-2 text-sm" />
+          <datalist id="daftarLokasi">
+            <option value="Kantor Pusat">
+            <option value="Cabang Brebes">
+          </datalist>
+        </div>
+        <div>
+          <label class="block text-xs font-medium mb-1">Departemen / Divisi</label>
+          <input type="text" id="departemen" list="daftarDepartemen" placeholder="Contoh: Accounting, QC, Sewing" class="w-full border rounded px-3 py-2 text-sm" />
+          <datalist id="daftarDepartemen"></datalist>
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-xs font-medium mb-1">Pemegang / Ruangan</label>
+          <input type="text" id="pemegang" placeholder="Nama Karyawan / Ruangan" class="w-full border rounded px-3 py-2 text-sm" />
+        </div>
+        <div class="md:col-span-2 flex justify-end items-end gap-2 pt-2">
+          <button type="button" onclick="resetForm()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-medium py-2 px-4 rounded text-sm transition">
+            Batal
+          </button>
+          <button type="submit" id="submitBtn" class="bg-blue-700 hover:bg-blue-800 text-white font-semibold py-2 px-6 rounded text-sm transition">
+            Simpan Aset
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Daftar Inventaris Aset -->
+    <section class="bg-white p-5 rounded-lg shadow-sm">
+      <div class="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-3 mb-4">
+        <div class="flex items-center gap-3">
+          <h2 class="text-base font-bold text-slate-700">Daftar Inventaris Aset</h2>
+          <button onclick="openAllHistoryModal()" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1 rounded text-xs font-semibold transition">
+            Semua Log Perpindahan
+          </button>
+        </div>
+        <div class="flex flex-col md:flex-row gap-2 w-full xl:w-auto">
+          <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Cari barcode, nama, departemen, pemegang..." class="border rounded px-3 py-2 text-sm w-full md:w-60" />
+          <select id="filterLokasi" onchange="renderTable()" class="border rounded px-3 py-2 text-sm w-full md:w-44">
+            <option value="ALL">Semua Lokasi / Cabang</option>
+          </select>
+          <select id="filterDepartemen" onchange="renderTable()" class="border rounded px-3 py-2 text-sm w-full md:w-44">
+            <option value="ALL">Semua Departemen</option>
+          </select>
+          <select id="filterStatus" onchange="renderTable()" class="border rounded px-3 py-2 text-sm w-full md:w-40">
+            <option value="ALL">Semua Status</option>
+            <option value="Tersedia">Tersedia</option>
+            <option value="Digunakan">Digunakan</option>
+            <option value="Rusak / Servis">Rusak / Servis</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-sm">
+          <thead>
+            <tr class="bg-slate-100 text-slate-600 border-b text-xs uppercase">
+              <th class="p-3">Barcode</th>
+              <th class="p-3">Nama Barang</th>
+              <th class="p-3">Kategori</th>
+              <th class="p-3">Status</th>
+              <th class="p-3">Tgl Masuk / Keluar</th>
+              <th class="p-3">Lokasi / Cabang</th>
+              <th class="p-3">Departemen</th>
+              <th class="p-3">Pemegang / Ruangan</th>
+              <th class="p-3 text-center">Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="assetTableBody" class="divide-y"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal Cetak Barcode -->
+  <div id="barcodeModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-lg p-6 max-w-sm w-full text-center space-y-4">
+      <h3 class="font-bold text-lg">Label Barcode Aset</h3>
+      <div id="printArea" class="border p-4 rounded bg-white flex flex-col items-center justify-center">
+        <p class="text-xs font-bold mb-1" id="printName"></p>
+        <svg id="modalBarcodeSvg"></svg>
+        <p class="text-[10px] font-semibold text-slate-700 mt-1" id="printLocation"></p>
+        <p class="text-[10px] text-slate-500" id="printDate"></p>
+      </div>
+      <div class="flex gap-2 justify-center">
+        <button onclick="printLabel()" class="bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">Cetak Label</button>
+        <button onclick="closeModal()" class="bg-slate-200 text-slate-800 px-4 py-2 rounded text-sm">Tutup</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Log Riwayat Perpindahan -->
+  <div id="historyModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-lg p-6 max-w-3xl w-full space-y-4 max-h-[85vh] flex flex-col">
+      <div class="flex justify-between items-center border-b pb-3">
+        <div>
+          <h3 class="font-bold text-lg text-slate-800" id="historyModalTitle">Log Riwayat Perpindahan Aset</h3>
+          <p class="text-xs text-slate-500" id="historyModalSubtitle">Catatan perubahan pemegang, departemen, cabang, dan status</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="exportHistoryExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded text-xs font-medium">
+            Unduh Log (.xlsx)
+          </button>
+          <button onclick="closeHistoryModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-1.5 rounded text-xs font-medium">
+            Tutup
+          </button>
+        </div>
+      </div>
+      <div class="overflow-y-auto flex-1">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="bg-slate-100 text-slate-600 border-b uppercase">
+              <th class="p-2.5">Waktu Catat</th>
+              <th class="p-2.5">Kode & Perangkat</th>
+              <th class="p-2.5">Tgl Keluar</th>
+              <th class="p-2.5">Perubahan Pemegang / Dept / Cabang</th>
+              <th class="p-2.5">Status</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody" class="divide-y"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // KONFIGURASI DATABASE ONLINE (OPSIONAL - SUPABASE)
+    // =========================================================================
+    const SUPABASE_URL = ""; 
+    const SUPABASE_ANON_KEY = "";
+
+    let supabaseClient = null;
+    if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+      supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      document.getElementById("db-status").innerText = "Mode: Terhubung ke Cloud Database (Online Multi-User)";
+      document.getElementById("db-status").classList.replace("text-blue-200", "text-emerald-300");
+    }
+
+    let assets = [];
+    let currentHistoryLogs = [];
+
+    const KNOWN_DEPARTMENTS = [
+      "Purchase", "Development", "Accounting", "HRD", "QC Lab", "QC",
+      "Sewing", "Lasting", "Cutting", "PPIC", "Exim", "Kasir",
+      "Finishing", "Injection", "Costing", "Gd.Bahan", "Gd.Jadi",
+      "Sekretaris", "IE", "Desma", "Rubber", "Produksi", "Server / IT"
+    ];
+
+    function detectLocation(kodeStr, rawLokasiStr, rawPemegangStr) {
+      const k = String(kodeStr || "").toUpperCase();
+      const l = String(rawLokasiStr || "").trim();
+      const p = String(rawPemegangStr || "").toUpperCase();
+
+      if (k.includes("BRB") || k.includes("BREBES") || p.includes("BRB") || p.includes("BREBES") || l.toUpperCase().includes("BRB") || l.toUpperCase().includes("BREBES")) {
+        return "Cabang Brebes";
+      }
+      if (l && l !== "-" && l.toLowerCase() !== "kantor pusat") {
+        return l;
+      }
+      return "Kantor Pusat";
+    }
+
+    function autoFillLocationFromCode() {
+      const editId = document.getElementById("editId").value;
+      if (editId) return;
+      const kodeVal = document.getElementById("kode").value.toUpperCase();
+      const lokasiInput = document.getElementById("lokasi");
+      if (kodeVal.includes("BRB") || kodeVal.includes("BREBES")) {
+        lokasiInput.value = "Cabang Brebes";
+      } else if (kodeVal.includes("JKT")) {
+        lokasiInput.value = "Kantor Pusat";
+      }
+    }
+
+    function detectDepartment(rawDept, rawPemegang) {
+      if (rawDept && String(rawDept).trim() !== "" && String(rawDept).trim() !== "-") {
+        return String(rawDept).trim();
+      }
+      const p = String(rawPemegang || "");
+      const pLower = p.toLowerCase();
+
+      for (const dept of KNOWN_DEPARTMENTS) {
+        if (pLower.includes(dept.toLowerCase())) {
+          return dept;
+        }
+      }
+      if (pLower.includes("server")) return "Server / IT";
+      if (pLower.includes("gaji")) return "HRD / Payroll";
+      if (pLower.includes("barcode")) return "Produksi";
+      return "-";
+    }
+
+    function formatDateValue(val) {
+      if (val === null || val === undefined) return "";
+      const str = String(val).trim();
+      if (!str || str === "-" || str.toLowerCase() === "null" || str.toLowerCase() === "undefined") return "";
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+
+      const dmy = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      if (dmy) {
+        return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+      }
+
+      const num = Number(str);
+      if (!isNaN(num) && num > 20000 && num < 80000) {
+        const utcDays = Math.floor(num - 25569);
+        const dateObj = new Date(utcDays * 86400 * 1000);
+        if (!isNaN(dateObj.getTime())) {
+          return dateObj.toISOString().split("T")[0];
+        }
+      }
+      return str;
+    }
+
+    function parseRawCSV(text) {
+      const rows = [];
+      let currentRow = [];
+      let currentVal = "";
+      let inQuotes = false;
+
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const nextChar = text[i + 1];
+
+        if (char === '"') {
+          if (inQuotes && nextChar === '"') {
+            currentVal += '"';
+            i++;
+          } else if (inQuotes && (nextChar === ',' || nextChar === ';' || nextChar === '\r' || nextChar === '\n' || nextChar === undefined)) {
+            inQuotes = false;
+          } else if (!inQuotes && currentVal.trim() === "") {
+            inQuotes = true;
+          } else {
+            currentVal += '"';
+          }
+        } else if ((char === ',' || char === ';') && !inQuotes) {
+          currentRow.push(currentVal.trim());
+          currentVal = "";
+        } else if ((char === '\r' || char === '\n') && !inQuotes) {
+          if (char === '\r' && nextChar === '\n') i++;
+          currentRow.push(currentVal.trim());
+          if (currentRow.some(cell => cell !== "")) {
+            rows.push(currentRow);
+          }
+          currentRow = [];
+          currentVal = "";
+        } else {
+          currentVal += char;
+        }
+      }
+
+      if (currentVal !== "" || currentRow.length > 0) {
+        currentRow.push(currentVal.trim());
+        if (currentRow.some(cell => cell !== "")) {
+          rows.push(currentRow);
+        }
+      }
+
+      if (rows.length < 2) return [];
+      const headers = rows[0].map(h => h.replace(/^\uFEFF/, "").trim());
+      return rows.slice(1).map(row => {
+        const obj = {};
+        headers.forEach((h, idx) => {
+          obj[h] = row[idx] !== undefined ? row[idx] : "";
+        });
+        return obj;
+      });
+    }
+
+    async function loadAssets() {
+      if (supabaseClient) {
+        const { data, error } = await supabaseClient.from("inventory_it").select("*").order("created_at", { ascending: false });
+        if (!error && data) {
+          assets = data.map(item => ({
+            ...item,
+            lokasi: detectLocation(item.kode, item.lokasi, item.pemegang),
+            departemen: detectDepartment(item.departemen, item.pemegang),
+            tgl_masuk: formatDateValue(item.tgl_masuk),
+            tgl_keluar: formatDateValue(item.tgl_keluar),
+            history: Array.isArray(item.history) ? item.history : []
+          }));
+          updateFilterOptions();
+          renderTable();
+          return;
+        }
+      }
+      const saved = localStorage.getItem("it_inventory_data");
+      let parsed = saved ? JSON.parse(saved) : [];
+      let migrated = false;
+
+      assets = parsed.map(item => {
+        const fixedLokasi = detectLocation(item.kode, item.lokasi, item.pemegang);
+        const fixedDept = detectDepartment(item.departemen, item.pemegang);
+        const fixedIn = formatDateValue(item.tgl_masuk);
+        const fixedOut = formatDateValue(item.tgl_keluar);
+
+        if (fixedLokasi !== item.lokasi || fixedDept !== item.departemen || fixedIn !== item.tgl_masuk || fixedOut !== item.tgl_keluar) {
+          migrated = true;
+        }
+        return {
+          ...item,
+          lokasi: fixedLokasi,
+          departemen: fixedDept,
+          tgl_masuk: fixedIn,
+          tgl_keluar: fixedOut,
+          history: Array.isArray(item.history) ? item.history : []
+        };
+      });
+
+      if (migrated) {
+        localStorage.setItem("it_inventory_data", JSON.stringify(assets));
+      }
+
+      updateFilterOptions();
+      renderTable();
+    }
+
+    function updateFilterOptions() {
+      const uniqueLocations = [...new Set(["Kantor Pusat", "Cabang Brebes", ...assets.map(a => a.lokasi).filter(Boolean)])].sort();
+      const filterLokasi = document.getElementById("filterLokasi");
+      const dataListLokasi = document.getElementById("daftarLokasi");
+      const currentLoc = filterLokasi.value;
+
+      filterLokasi.innerHTML = '<option value="ALL">Semua Lokasi / Cabang</option>';
+      dataListLokasi.innerHTML = '';
+      uniqueLocations.forEach(loc => {
+        filterLokasi.innerHTML += `<option value="${loc}">${loc}</option>`;
+        dataListLokasi.innerHTML += `<option value="${loc}">`;
+      });
+      if (uniqueLocations.includes(currentLoc)) filterLokasi.value = currentLoc;
+
+      const uniqueDepts = [...new Set([...KNOWN_DEPARTMENTS, ...assets.map(a => a.departemen).filter(d => d && d !== "-")])].sort();
+      const filterDept = document.getElementById("filterDepartemen");
+      const dataListDept = document.getElementById("daftarDepartemen");
+      const currentDept = filterDept.value;
+
+      filterDept.innerHTML = '<option value="ALL">Semua Departemen</option>';
+      dataListDept.innerHTML = '';
+      uniqueDepts.forEach(dept => {
+        filterDept.innerHTML += `<option value="${dept}">${dept}</option>`;
+        dataListDept.innerHTML += `<option value="${dept}">`;
+      });
+      if (uniqueDepts.includes(currentDept)) filterDept.value = currentDept;
+    }
+
+    function editAsset(id) {
+      const item = assets.find(a => String(a.id) === String(id));
+      if (!item) return;
+
+      document.getElementById("editId").value = item.id;
+      document.getElementById("kode").value = item.kode || "";
+      document.getElementById("nama").value = item.nama || "";
+
+      const katSelect = document.getElementById("kategori");
+      if (![...katSelect.options].some(o => o.value === item.kategori) && item.kategori) {
+        katSelect.innerHTML += `<option value="${item.kategori}">${item.kategori}</option>`;
+      }
+      katSelect.value = item.kategori || "Laptop";
+
+      document.getElementById("status").value = item.status || "Tersedia";
+      document.getElementById("tglMasuk").value = formatDateValue(item.tgl_masuk);
+      document.getElementById("tglKeluar").value = formatDateValue(item.tgl_keluar);
+      document.getElementById("lokasi").value = item.lokasi || "Kantor Pusat";
+      document.getElementById("departemen").value = (item.departemen && item.departemen !== "-") ? item.departemen : "";
+      document.getElementById("pemegang").value = (item.pemegang && item.pemegang !== "-") ? item.pemegang : "";
+
+      document.getElementById("formTitle").innerText = "Edit Data & Perpindahan Aset";
+      document.getElementById("editBadge").classList.remove("hidden");
+      document.getElementById("formSection").classList.replace("border-blue-700", "border-amber-500");
+      const submitBtn = document.getElementById("submitBtn");
+      submitBtn.innerText = "Perbarui Aset";
+      submitBtn.classList.replace("bg-blue-700", "bg-amber-600");
+      submitBtn.classList.replace("hover:bg-blue-800", "hover:bg-amber-700");
+
+      document.getElementById("formSection").scrollIntoView({ behavior: "smooth" });
+    }
+
+    function resetForm() {
+      document.getElementById("assetForm").reset();
+      document.getElementById("editId").value = "";
+      document.getElementById("formTitle").innerText = "Input Aset Baru";
+      document.getElementById("editBadge").classList.add("hidden");
+      document.getElementById("formSection").classList.replace("border-amber-500", "border-blue-700");
+      const submitBtn = document.getElementById("submitBtn");
+      submitBtn.innerText = "Simpan Aset";
+      submitBtn.classList.replace("bg-amber-600", "bg-blue-700");
+      submitBtn.classList.replace("hover:bg-amber-700", "hover:bg-blue-800");
+    }
+
+    function getTimestampNow() {
+      const now = new Date();
+      return now.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) + " " +
+             now.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+    }
+
+    async function saveAsset(e) {
+      e.preventDefault();
+      const editId = document.getElementById("editId").value;
+      const kodeVal = document.getElementById("kode").value.trim().toUpperCase();
+      const rawLokVal = document.getElementById("lokasi").value.trim();
+      const pemegangVal = document.getElementById("pemegang").value.trim() || "-";
+      const rawDeptVal = document.getElementById("departemen").value.trim();
+
+      const itemData = {
+        kode: kodeVal,
+        nama: document.getElementById("nama").value.trim(),
+        kategori: document.getElementById("kategori").value,
+        status: document.getElementById("status").value,
+        tgl_masuk: formatDateValue(document.getElementById("tglMasuk").value),
+        tgl_keluar: formatDateValue(document.getElementById("tglKeluar").value),
+        lokasi: detectLocation(kodeVal, rawLokVal, pemegangVal),
+        departemen: detectDepartment(rawDeptVal, pemegangVal),
+        pemegang: pemegangVal
+      };
+
+      if (editId) {
+        const existingItem = assets.find(a => String(a.id) === String(editId));
+        let updatedHistory = Array.isArray(existingItem?.history) ? [...existingItem.history] : [];
+
+        if (existingItem) {
+          const isChanged = existingItem.pemegang !== itemData.pemegang ||
+                            existingItem.lokasi !== itemData.lokasi ||
+                            (existingItem.departemen || "-") !== itemData.departemen ||
+                            existingItem.status !== itemData.status ||
+                            (existingItem.tgl_keluar || "") !== (itemData.tgl_keluar || "");
+
+          if (isChanged) {
+            updatedHistory.unshift({
+              waktu: getTimestampNow(),
+              tgl_keluar: itemData.tgl_keluar || "-",
+              pemegang_lama: existingItem.pemegang || "-",
+              pemegang_baru: itemData.pemegang || "-",
+              lokasi_lama: existingItem.lokasi || "-",
+              lokasi_baru: itemData.lokasi || "-",
+              dept_lama: existingItem.departemen || "-",
+              dept_baru: itemData.departemen || "-",
+              status_baru: itemData.status
+            });
+          }
+        }
+        itemData.history = updatedHistory;
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from("inventory_it").update(itemData).eq("id", editId);
+          if (error) return alert("Gagal memperbarui data di server: " + error.message);
+          await loadAssets();
+        } else {
+          const idx = assets.findIndex(a => String(a.id) === String(editId));
+          if (idx !== -1) {
+            assets[idx] = { ...assets[idx], ...itemData };
+            localStorage.setItem("it_inventory_data", JSON.stringify(assets));
+          }
+          updateFilterOptions();
+          renderTable();
+        }
+      } else {
+        itemData.history = [{
+          waktu: getTimestampNow(),
+          tgl_keluar: itemData.tgl_keluar || "-",
+          pemegang_lama: "Aset Baru",
+          pemegang_baru: itemData.pemegang,
+          lokasi_lama: "-",
+          lokasi_baru: itemData.lokasi,
+          dept_lama: "-",
+          dept_baru: itemData.departemen,
+          status_baru: itemData.status
+        }];
+
+        if (supabaseClient) {
+          const { error } = await supabaseClient.from("inventory_it").insert([itemData]);
+          if (error) return alert("Gagal menyimpan ke server: " + error.message);
+          await loadAssets();
+        } else {
+          itemData.id = Date.now();
+          assets.unshift(itemData);
+          localStorage.setItem("it_inventory_data", JSON.stringify(assets));
+          updateFilterOptions();
+          renderTable();
+        }
+      }
+      resetForm();
+    }
+
+    async function deleteAsset(id) {
+      if (!confirm("Hapus data aset ini?")) return;
+      if (String(document.getElementById("editId").value) === String(id)) {
+        resetForm();
+      }
+      if (supabaseClient) {
+        await supabaseClient.from("inventory_it").delete().eq("id", id);
+        await loadAssets();
+      } else {
+        assets = assets.filter(item => String(item.id) !== String(id));
+        localStorage.setItem("it_inventory_data", JSON.stringify(assets));
+        updateFilterOptions();
+        renderTable();
+      }
+    }
+
+    function renderTable() {
+      const keyword = document.getElementById("searchInput").value.toLowerCase();
+      const filterLokasi = document.getElementById("filterLokasi").value;
+      const filterDept = document.getElementById("filterDepartemen").value;
+      const filterStatus = document.getElementById("filterStatus").value;
+      const tbody = document.getElementById("assetTableBody");
+      tbody.innerHTML = "";
+
+      const filtered = assets.filter(item => {
+        const matchText = item.kode.toLowerCase().includes(keyword) ||
+                          item.nama.toLowerCase().includes(keyword) ||
+                          (item.lokasi && item.lokasi.toLowerCase().includes(keyword)) ||
+                          (item.departemen && item.departemen.toLowerCase().includes(keyword)) ||
+                          (item.pemegang && item.pemegang.toLowerCase().includes(keyword));
+        const matchLokasi = filterLokasi === "ALL" || (item.lokasi || "") === filterLokasi;
+        const matchDept = filterDept === "ALL" || (item.departemen || "-") === filterDept;
+        const matchStatus = filterStatus === "ALL" || item.status === filterStatus;
+        return matchText && matchLokasi && matchDept && matchStatus;
+      });
+
+      filtered.forEach((item, index) => {
+        const badgeColor = item.status === "Tersedia" ? "bg-emerald-100 text-emerald-700" : item.status === "Digunakan" ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700";
+        const locBadgeColor = (item.lokasi || "").toLowerCase().includes("brebes") ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700";
+
+        const inDate = formatDateValue(item.tgl_masuk);
+        const outDate = formatDateValue(item.tgl_keluar);
+        let dateHtml = '<span class="text-slate-400">-</span>';
+        if (inDate || outDate) {
+          dateHtml = "";
+          if (inDate) dateHtml += `<div><span class="text-slate-400">In:</span> ${inDate}</div>`;
+          if (outDate) dateHtml += `<div><span class="text-slate-400">Out:</span> ${outDate}</div>`;
+        }
+
+        const logCount = Array.isArray(item.history) ? item.history.length : 0;
+
+        const row = document.createElement("tr");
+        row.className = "hover:bg-slate-50";
+        row.innerHTML = `
+          <td class="p-3">
+            <svg id="barcode-${index}" class="h-10"></svg>
+          </td>
+          <td class="p-3">
+            <div class="font-semibold text-slate-800">${item.nama}</div>
+            <div class="text-xs text-slate-500">${item.kode}</div>
+          </td>
+          <td class="p-3 text-xs">${item.kategori || "-"}</td>
+          <td class="p-3"><span class="px-2 py-1 rounded-full text-xs font-semibold ${badgeColor}">${item.status}</span></td>
+          <td class="p-3 text-xs">${dateHtml}</td>
+          <td class="p-3 text-xs"><span class="px-2 py-1 rounded font-semibold ${locBadgeColor}">${item.lokasi || "Kantor Pusat"}</span></td>
+          <td class="p-3 text-xs font-medium text-slate-700">${item.departemen || "-"}</td>
+          <td class="p-3 text-xs font-medium">${item.pemegang || "-"}</td>
+          <td class="p-3 text-center whitespace-nowrap space-x-1">
+            <button onclick="editAsset('${item.id}')" class="bg-amber-100 hover:bg-amber-200 text-amber-800 px-2 py-1 rounded text-xs font-medium">Edit</button>
+            <button onclick="openItemHistoryModal('${item.id}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 px-2 py-1 rounded text-xs font-medium">Log${logCount > 0 ? ` (${logCount})` : ""}</button>
+            <button onclick='openBarcodeModal(${JSON.stringify(item).replace(/'/g, "&#39;")})' class="bg-slate-200 hover:bg-slate-300 px-2 py-1 rounded text-xs">Cetak</button>
+            <button onclick="deleteAsset('${item.id}')" class="bg-rose-100 hover:bg-rose-200 text-rose-700 px-2 py-1 rounded text-xs">Hapus</button>
+          </td>
+        `;
+        tbody.appendChild(row);
+
+        try {
+          JsBarcode(`#barcode-${index}`, item.kode, { format: "CODE128", width: 1.3, height: 32, displayValue: true, fontSize: 10, margin: 0 });
+        } catch (e) {}
+      });
+
+      document.getElementById("stat-total").innerText = filtered.length;
+      document.getElementById("stat-available").innerText = filtered.filter(a => a.status === "Tersedia").length;
+      document.getElementById("stat-used").innerText = filtered.filter(a => a.status === "Digunakan").length;
+      document.getElementById("stat-broken").innerText = filtered.filter(a => a.status === "Rusak / Servis").length;
+    }
+
+    function openItemHistoryModal(id) {
+      const item = assets.find(a => String(a.id) === String(id));
+      if (!item) return;
+
+      document.getElementById("historyModalTitle").innerText = `Log Perpindahan: ${item.kode}`;
+      document.getElementById("historyModalSubtitle").innerText = `${item.nama} • Lokasi Saat Ini: ${item.lokasi} (${item.departemen || "-"})`;
+
+      const logs = Array.isArray(item.history) ? item.history.map(h => ({
+        kode: item.kode,
+        nama: item.nama,
+        ...h
+      })) : [];
+
+      currentHistoryLogs = logs;
+      renderHistoryRows(logs);
+      document.getElementById("historyModal").classList.replace("hidden", "flex");
+    }
+
+    function openAllHistoryModal() {
+      document.getElementById("historyModalTitle").innerText = "Semua Log Riwayat Perpindahan Aset";
+      document.getElementById("historyModalSubtitle").innerText = "Seluruh riwayat pergantian pemegang, departemen, dan cabang perangkat IT";
+
+      const allLogs = [];
+      assets.forEach(item => {
+        if (Array.isArray(item.history)) {
+          item.history.forEach(h => {
+            allLogs.push({
+              kode: item.kode,
+              nama: item.nama,
+              ...h
+            });
+          });
+        }
+      });
+
+      currentHistoryLogs = allLogs;
+      renderHistoryRows(allLogs);
+      document.getElementById("historyModal").classList.replace("hidden", "flex");
+    }
+
+    function renderHistoryRows(logs) {
+      const tbody = document.getElementById("historyTableBody");
+      tbody.innerHTML = "";
+
+      if (logs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">Belum ada riwayat perpindahan yang tercatat untuk aset ini.</td></tr>`;
+        return;
+      }
+
+      logs.forEach(log => {
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-50";
+        tr.innerHTML = `
+          <td class="p-2.5 text-slate-600 whitespace-nowrap">${log.waktu || "-"}</td>
+          <td class="p-2.5">
+            <div class="font-semibold text-slate-800">${log.kode}</div>
+            <div class="text-[11px] text-slate-500">${log.nama}</div>
+          </td>
+          <td class="p-2.5 text-slate-700 whitespace-nowrap">${log.tgl_keluar || "-"}</td>
+          <td class="p-2.5">
+            <div><span class="text-slate-400">Pemegang:</span> <span class="line-through text-slate-400">${log.pemegang_lama}</span> &rarr; <span class="font-semibold text-slate-800">${log.pemegang_baru}</span></div>
+            <div class="text-[11px] text-slate-500">Dept: ${log.dept_lama || "-"} &rarr; ${log.dept_baru || "-"} | Cabang: ${log.lokasi_lama} &rarr; ${log.lokasi_baru}</div>
+          </td>
+          <td class="p-2.5 font-medium">${log.status_baru || "-"}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function closeHistoryModal() {
+      document.getElementById("historyModal").classList.replace("flex", "hidden");
+    }
+
+    function exportHistoryExcel() {
+      if (currentHistoryLogs.length === 0) return alert("Tidak ada data log untuk diunduh.");
+      const exportData = currentHistoryLogs.map(l => ({
+        "Waktu Catat": l.waktu,
+        "Kode Aset": l.kode,
+        "Nama Barang": l.nama,
+        "Tanggal Keluar": l.tgl_keluar,
+        "Pemegang Sebelumnya": l.pemegang_lama,
+        "Pemegang Baru": l.pemegang_baru,
+        "Departemen Sebelumnya": l.dept_lama || "-",
+        "Departemen Baru": l.dept_baru || "-",
+        "Lokasi Sebelumnya": l.lokasi_lama,
+        "Lokasi Baru": l.lokasi_baru,
+        "Status": l.status_baru
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Log_Perpindahan");
+      XLSX.writeFile(wb, "Log_Perpindahan_Aset_IT.xlsx");
+    }
+
+    function openBarcodeModal(item) {
+      document.getElementById("printName").innerText = item.nama;
+      document.getElementById("printLocation").innerText = `${item.lokasi || "Kantor Pusat"}${item.departemen && item.departemen !== "-" ? " • " + item.departemen : ""}`;
+      const inD = formatDateValue(item.tgl_masuk);
+      const outD = formatDateValue(item.tgl_keluar);
+      document.getElementById("printDate").innerText = (inD || outD) ? `In: ${inD || "-"} | Out: ${outD || "-"}` : "";
+      JsBarcode("#modalBarcodeSvg", item.kode, { format: "CODE128", width: 2, height: 60, displayValue: true, fontSize: 14 });
+      document.getElementById("barcodeModal").classList.replace("hidden", "flex");
+    }
+
+    function closeModal() {
+      document.getElementById("barcodeModal").classList.replace("flex", "hidden");
+    }
+
+    function printLabel() {
+      const content = document.getElementById("printArea").innerHTML;
+      const win = window.open("", "", "width=400,height=300");
+      win.document.write(`<html><body style="text-align:center;font-family:sans-serif;padding:20px;">${content}</body></html>`);
+      win.document.close();
+      win.print();
+    }
+
+    function downloadTemplate() {
+      const sample = [
+        { "Kode Aset / Barcode": "IT-JKT-001", "Nama & Tipe Barang": "Lenovo ThinkPad X1", "Kategori": "Laptop", "Status": "Tersedia", "Tanggal Masuk": "2026-11-19", "Tanggal Keluar": "", "Lokasi / Cabang": "Kantor Pusat", "Departemen": "Accounting", "Pemegang / Lokasi": "Stok Gudang" },
+        { "Kode Aset / Barcode": "IT-BRB-001", "Nama & Tipe Barang": "PC Intel i5 12400", "Kategori": "PC Desktop", "Status": "Digunakan", "Tanggal Masuk": "2026-11-19", "Tanggal Keluar": "2026-11-20", "Lokasi / Cabang": "Cabang Brebes", "Departemen": "Sewing", "Pemegang / Lokasi": "Admin Sewing" }
+      ];
+      const ws = XLSX.utils.json_to_sheet(sample);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Template_Inventaris");
+      XLSX.writeFile(wb, "Template_Inventory_IT.csv", { bookType: "csv" });
+    }
+
+    function exportExcel() {
+      const exportData = assets.map(({ history, id, ...rest }) => ({
+        "Kode Aset / Barcode": rest.kode,
+        "Nama & Tipe Barang": rest.nama,
+        "Kategori": rest.kategori,
+        "Status": rest.status,
+        "Tanggal Masuk": formatDateValue(rest.tgl_masuk),
+        "Tanggal Keluar": formatDateValue(rest.tgl_keluar),
+        "Lokasi / Cabang": rest.lokasi,
+        "Departemen": rest.departemen || "-",
+        "Pemegang / Ruangan": rest.pemegang
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Data_Inventaris");
+      XLSX.writeFile(wb, "Database_Inventory_IT.xlsx");
+    }
+
+    function importExcel(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const isCSV = file.name.toLowerCase().endsWith(".csv");
+      const reader = new FileReader();
+
+      reader.onload = async (e) => {
+        try {
+          let rows = [];
+          if (isCSV) {
+            rows = parseRawCSV(e.target.result);
+          } else {
+            const workbook = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
+            rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+          }
+
+          const validRows = rows.filter(r => {
+            const kode = String(r["Kode Aset / Barcode"] || r.kode || r.Kode || "").trim();
+            const nama = String(r["Nama & Tipe Barang"] || r.nama || r.Nama || "").trim();
+            if (!kode || !nama) return false;
+            if (kode.toLowerCase() === "kolom" || kode.toLowerCase() === "kode aset / barcode" || kode.toLowerCase().startsWith("cara impor")) return false;
+            return true;
+          });
+
+          if (validRows.length === 0) {
+            alert("Tidak ditemukan baris data perangkat yang valid pada file tersebut. Pastikan header kolom sesuai templat.");
+            event.target.value = "";
+            return;
+          }
+
+          let replaceMode = false;
+          if (assets.length > 0) {
+            replaceMode = confirm(
+              `Ditemukan ${validRows.length} data perangkat dari file.\n\n` +
+              `• Klik OK untuk MENGGANTI / MENIMPA seluruh data lama (${assets.length} unit).\n` +
+              `• Klik Cancel untuk MENAMBAHKAN ke data yang sudah ada.`
+            );
+          }
+
+          const formatted = validRows.map((r, i) => {
+            const kodeVal = String(r["Kode Aset / Barcode"] || r.kode || r.Kode).trim().toUpperCase();
+            const rawPemegang = String(r["Pemegang / Ruangan"] || r["Pemegang / Lokasi"] || r.pemegang || r.Pemegang || "-").trim();
+            const rawLokasi = String(r["Lokasi / Cabang"] || r.lokasi || r.Lokasi || "").trim();
+            const rawDept = String(r["Departemen"] || r["Departemen / Divisi"] || r.departemen || "").trim();
+            const detectedLoc = detectLocation(kodeVal, rawLokasi, rawPemegang);
+            const detectedDept = detectDepartment(rawDept, rawPemegang);
+
+            return {
+              id: Date.now() + i,
+              kode: kodeVal,
+              nama: String(r["Nama & Tipe Barang"] || r.nama || r.Nama).trim(),
+              kategori: String(r["Kategori"] || r.kategori || "Laptop").trim(),
+              status: String(r["Status"] || r.status || "Tersedia").trim(),
+              tgl_masuk: formatDateValue(r["Tanggal Masuk"] || r.tgl_masuk),
+              tgl_keluar: formatDateValue(r["Tanggal Keluar"] || r.tgl_keluar),
+              lokasi: detectedLoc,
+              departemen: detectedDept,
+              pemegang: rawPemegang || "-",
+              history: [{
+                waktu: getTimestampNow(),
+                tgl_keluar: formatDateValue(r["Tanggal Keluar"] || r.tgl_keluar) || "-",
+                pemegang_lama: "Impor File",
+                pemegang_baru: rawPemegang || "-",
+                lokasi_lama: "-",
+                lokasi_baru: detectedLoc,
+                dept_lama: "-",
+                dept_baru: detectedDept,
+                status_baru: String(r["Status"] || r.status || "Tersedia").trim()
+              }]
+            };
+          });
+
+          if (supabaseClient) {
+            if (replaceMode) {
+              await supabaseClient.from("inventory_it").delete().neq("id", 0);
+            }
+            const cleanRows = formatted.map(({ id, ...rest }) => rest);
+            const { error } = await supabaseClient.from("inventory_it").insert(cleanRows);
+            if (error) {
+              alert("Gagal menyimpan ke Supabase: " + error.message);
+              return;
+            }
+            await loadAssets();
+          } else {
+            assets = replaceMode ? formatted : [...formatted, ...assets];
+            localStorage.setItem("it_inventory_data", JSON.stringify(assets));
+            updateFilterOptions();
+          }
+
+          document.getElementById("searchInput").value = "";
+          document.getElementById("filterLokasi").value = "ALL";
+          document.getElementById("filterDepartemen").value = "ALL";
+          document.getElementById("filterStatus").value = "ALL";
+          renderTable();
+
+          alert(`${formatted.length} unit perangkat berhasil diimpor!`);
+        } catch (err) {
+          alert("Terjadi kesalahan saat membaca file: " + err.message);
+        }
+        event.target.value = "";
+      };
+
+      if (isCSV) {
+        reader.readAsText(file);
+      } else {
+        reader.readAsArrayBuffer(file);
+      }
+    }
+
+    loadAssets();
+  </script>
+</body>
+</html>
