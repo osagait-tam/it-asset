@@ -135,6 +135,9 @@
           <button onclick="openAllHistoryModal()" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1 rounded text-xs font-semibold transition">
             Semua Log Perpindahan
           </button>
+		            <button id="btnBulkPrint" onclick="openBulkBarcodeModal()" class="hidden bg-teal-600 hover:bg-teal-700 text-white px-3 py-1 rounded text-xs font-semibold shadow-sm transition">
+            Cetak Barcode Terpilih (<span id="selectedCount">0</span>)
+          </button>
         </div>
         <div class="flex flex-col md:flex-row gap-2 w-full xl:w-auto">
           <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Cari barcode, nama, departemen, pemegang..." class="border rounded px-3 py-2 text-sm w-full md:w-60" />
@@ -157,6 +160,9 @@
         <table class="w-full text-left border-collapse text-sm">
           <thead>
             <tr class="bg-slate-100 text-slate-600 border-b text-xs uppercase">
+			   <th class="p-3 w-10 text-center">
+              <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" title="Pilih semua yang tampil" class="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer" />
+              </th>
               <th class="p-3">Barcode</th>
               <th class="p-3">Nama Barang</th>
               <th class="p-3">Kategori</th>
@@ -173,6 +179,29 @@
       </div>
     </section>
   </main>
+
+  <!-- Modal Cetak Banyak Barcode -->
+  <div id="bulkBarcodeModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-lg p-6 max-w-4xl w-full space-y-4 max-h-[90vh] flex flex-col">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b pb-3">
+        <div>
+          <h3 class="font-bold text-lg text-slate-800">Cetak Banyak Label Barcode (<span id="bulkModalCount">0</span> Unit)</h3>
+          <p class="text-xs text-slate-500">Tata letak grid 3 kolom stiker label barcode siap cetak</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="printBulkLabels()" class="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded text-xs font-semibold">
+            Cetak Semua Sekarang
+          </button>
+          <button onclick="closeBulkModal()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-2 rounded text-xs font-medium">
+            Tutup
+          </button>
+        </div>
+      </div>
+      <div class="overflow-y-auto flex-1 bg-slate-50 p-4 rounded border">
+        <div id="bulkPrintArea" class="grid grid-cols-2 sm:grid-cols-3 gap-3"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- Modal Cetak Barcode -->
   <div id="barcodeModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
@@ -241,6 +270,7 @@
 
     let assets = [];
     let currentHistoryLogs = [];
+    let selectedCodes = new Set();
 
     const KNOWN_DEPARTMENTS = [
       "Purchase", "Development", "Accounting", "HRD", "QC Lab", "QC",
@@ -636,9 +666,13 @@
 
         const logCount = Array.isArray(item.history) ? item.history.length : 0;
 
+                const isChecked = selectedCodes.has(item.kode) ? "checked" : "";
         const row = document.createElement("tr");
-        row.className = "hover:bg-slate-50";
+        row.className = isChecked ? "bg-blue-50/60 hover:bg-blue-50" : "hover:bg-slate-50";
         row.innerHTML = `
+          <td class="p-3 text-center">
+            <input type="checkbox" ${isChecked} onchange="toggleSelectRow('${item.kode}', this.checked)" class="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer" />
+          </td>
           <td class="p-3">
             <svg id="barcode-${index}" class="h-10"></svg>
           </td>
@@ -670,6 +704,7 @@
       document.getElementById("stat-available").innerText = filtered.filter(a => a.status === "Tersedia").length;
       document.getElementById("stat-used").innerText = filtered.filter(a => a.status === "Digunakan").length;
       document.getElementById("stat-broken").innerText = filtered.filter(a => a.status === "Rusak / Servis").length;
+	  updateSelectionUI();
     }
 
     function openItemHistoryModal(id) {
@@ -925,7 +960,73 @@
         reader.readAsArrayBuffer(file);
       }
     }
+    function toggleSelectRow(kode, isChecked) {
+      if (isChecked) selectedCodes.add(kode);
+      else selectedCodes.delete(kode);
+      updateSelectionUI();
+    }
 
+    function toggleSelectAll(isChecked) {
+      const keyword = document.getElementById("searchInput").value.toLowerCase();
+      const filterLokasi = document.getElementById("filterLokasi").value;
+      const filterDept = document.getElementById("filterDepartemen").value;
+      const filterStatus = document.getElementById("filterStatus").value;
+
+      assets.filter(item => {
+        const matchText = item.kode.toLowerCase().includes(keyword) || item.nama.toLowerCase().includes(keyword) || (item.lokasi && item.lokasi.toLowerCase().includes(keyword)) || (item.departemen && item.departemen.toLowerCase().includes(keyword)) || (item.pemegang && item.pemegang.toLowerCase().includes(keyword));
+        const matchLokasi = filterLokasi === "ALL" || (item.lokasi || "").toLowerCase() === filterLokasi.toLowerCase();
+        const matchDept = filterDept === "ALL" || (item.departemen || "-").toLowerCase() === filterDept.toLowerCase();
+        const matchStatus = filterStatus === "ALL" || item.status === filterStatus;
+        return matchText && matchLokasi && matchDept && matchStatus;
+      }).forEach(item => {
+        if (isChecked) selectedCodes.add(item.kode);
+        else selectedCodes.delete(item.kode);
+      });
+      renderTable();
+    }
+
+    function updateSelectionUI() {
+      const validCodes = new Set(assets.map(a => a.kode));
+      for (const code of selectedCodes) { if (!validCodes.has(code)) selectedCodes.delete(code); }
+      const btn = document.getElementById("btnBulkPrint");
+      document.getElementById("selectedCount").innerText = selectedCodes.size;
+      if (selectedCodes.size > 0) btn.classList.remove("hidden");
+      else btn.classList.add("hidden");
+    }
+
+    function openBulkBarcodeModal() {
+      const selectedItems = assets.filter(a => selectedCodes.has(a.kode));
+      if (selectedItems.length === 0) return alert("Pilih minimal satu perangkat terlebih dahulu.");
+      document.getElementById("bulkModalCount").innerText = selectedItems.length;
+      const container = document.getElementById("bulkPrintArea");
+      container.innerHTML = "";
+      selectedItems.forEach((item, idx) => {
+        const card = document.createElement("div");
+        card.className = "label-card border border-slate-300 rounded p-3 bg-white flex flex-col items-center justify-center text-center";
+        card.innerHTML = `
+          <p class="text-[11px] font-bold text-slate-800 mb-1 leading-tight">${item.nama}</p>
+          <svg id="bulk-svg-${idx}"></svg>
+          <p class="text-[9px] font-semibold text-slate-600 mt-1">${item.lokasi || "Kantor Pusat"}${item.departemen && item.departemen !== "-" ? " • " + item.departemen : ""}</p>
+        `;
+        container.appendChild(card);
+        try { JsBarcode(`#bulk-svg-${idx}`, item.kode, { format: "CODE128", width: 1.5, height: 42, displayValue: true, fontSize: 11, margin: 2 }); } catch (e) {}
+      });
+      document.getElementById("bulkBarcodeModal").classList.replace("hidden", "flex");
+    }
+
+    function closeBulkModal() {
+      document.getElementById("bulkBarcodeModal").classList.replace("flex", "hidden");
+    }
+
+    function printBulkLabels() {
+      const content = document.getElementById("bulkPrintArea").innerHTML;
+      const win = window.open("", "", "width=850,height=650");
+      win.document.write(`<html><head><title>Cetak Label Barcode</title><style>body{font-family:sans-serif;margin:10mm;}.grid-labels{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}.label-card{border:1px solid #94a3b8;border-radius:4px;padding:8px;text-align:center;page-break-inside:avoid;display:flex;flex-direction:column;align-items:center;justify-content:center;}.label-card p{margin:2px 0;font-size:10px;}svg{max-width:100%;height:auto;}</style></head><body><div class="grid-labels">${content}</div></body></html>`);
+      win.document.close();
+      win.focus();
+      setTimeout(() => { win.print(); }, 250);
+    }
+	
     loadAssets();
   </script>
 </body>
